@@ -83,6 +83,7 @@ class Config(BaseSettings):
         `export ALLOW_ORIGINS='["*"]'`
     """
 
+    enable_turkish_models: bool = False
     enable_ui: bool = True
     """
     Whether to enable the Gradio UI. You may want to disable this if you want to minimize the dependencies and slightly improve the startup time.

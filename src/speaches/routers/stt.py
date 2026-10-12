@@ -9,10 +9,12 @@ from fastapi import (
     HTTPException,
     Request,
     Response,
+    UploadFile,
 )
 from fastapi.responses import StreamingResponse
 from faster_whisper.transcribe import BatchedInferencePipeline, TranscriptionInfo
 from huggingface_hub.utils._cache_manager import _scan_cached_repo
+from starlette.concurrency import run_in_threadpool
 
 from speaches.api_types import (
     DEFAULT_TIMESTAMP_GRANULARITIES,
@@ -22,7 +24,12 @@ from speaches.api_types import (
     TimestampGranularities,
     TranscriptionSegment,
 )
-from speaches.dependencies import AudioFileDependency, ConfigDependency, WhisperModelManagerDependency
+from speaches.dependencies import (
+    AudioFileDependency,
+    ConfigDependency,
+    WhisperModelManagerDependency,
+    audio_file_dependency,
+)
 from speaches.executors.whisper import utils as whisper_utils
 from speaches.hf_utils import (
     MODEL_CARD_DOESNT_EXISTS_ERROR_MESSAGE,
@@ -152,7 +159,50 @@ async def get_timestamp_granularities(request: Request) -> TimestampGranularitie
     "/v1/audio/transcriptions",
     response_model=str | CreateTranscriptionResponseJson | CreateTranscriptionResponseVerboseJson,
 )
-def transcribe_file(
+async def transcribe_file(
+    config: ConfigDependency,
+    model_manager: WhisperModelManagerDependency,
+    request: Request,
+    file: Annotated[UploadFile, Form()],
+    model: Annotated[ModelId, Form()],
+    language: Annotated[str | None, Form()] = None,
+    prompt: Annotated[str | None, Form()] = None,
+    response_format: Annotated[ResponseFormat, Form()] = DEFAULT_RESPONSE_FORMAT,
+    temperature: Annotated[float, Form()] = 0.0,
+    timestamp_granularities: Annotated[
+        TimestampGranularities,
+        # WARN: `alias` doesn't actually work.
+        Form(alias="timestamp_granularities[]"),
+    ] = ["segment"],
+    stream: Annotated[bool, Form()] = False,
+    hotwords: Annotated[str | None, Form()] = None,
+    vad_filter: Annotated[bool | None, Form()] = None,
+) -> Response | StreamingResponse:
+    if model in ("mihuai/turkish-stt", "duxx/turkish-stt-zipformer"):
+        runtime = request.app.state.turkish
+        if runtime is None:
+            raise HTTPException(503, "Turkish models are disabled")
+        return await runtime.transcription(request, file, language, response_format, stream, model=model)
+    audio = await run_in_threadpool(audio_file_dependency, file)
+    return await run_in_threadpool(
+        transcribe_whisper,
+        config,
+        model_manager,
+        request,
+        audio,
+        model,
+        language,
+        prompt,
+        response_format,
+        temperature,
+        timestamp_granularities,
+        stream,
+        hotwords,
+        vad_filter,
+    )
+
+
+def transcribe_whisper(
     config: ConfigDependency,
     model_manager: WhisperModelManagerDependency,
     request: Request,

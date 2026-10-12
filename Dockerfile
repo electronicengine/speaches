@@ -1,4 +1,4 @@
-ARG BASE_IMAGE=nvidia/cuda:12.9.1-cudnn-runtime-ubuntu24.04
+ARG BASE_IMAGE=ubuntu:24.04
 # hadolint ignore=DL3006
 FROM ${BASE_IMAGE}
 LABEL org.opencontainers.image.source="https://github.com/speaches-ai/speaches"
@@ -24,12 +24,12 @@ COPY --chown=ubuntu --from=ghcr.io/astral-sh/uv:0.7.20 /uv /bin/uv
 # https://docs.astral.sh/uv/guides/integration/docker/#intermediate-layers
 # https://docs.astral.sh/uv/guides/integration/docker/#compiling-bytecode
 # TODO: figure out if `/home/ubuntu/.cache/uv` should be used instead of `/root/.cache/uv`
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/home/ubuntu/.cache/uv,uid=1000,gid=1000 \
     --mount=type=bind,source=uv.lock,target=uv.lock \
     --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
-    uv sync --frozen --compile-bytecode --no-install-project --extra ui
+    uv sync --frozen --compile-bytecode --no-install-project --no-dev --extra ui
 COPY --chown=ubuntu . .
-RUN --mount=type=cache,target=/root/.cache/uv \
+RUN --mount=type=cache,target=/home/ubuntu/.cache/uv,uid=1000,gid=1000 \
     uv sync --frozen --compile-bytecode --extra ui
 # Creating a directory for the cache to avoid the following error:
 # PermissionError: [Errno 13] Permission denied: '/home/ubuntu/.cache/huggingface/hub'

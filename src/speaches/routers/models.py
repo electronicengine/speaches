@@ -15,6 +15,7 @@ from speaches.executors.kokoro.utils import KokoroModel, KokoroModelVoice
 from speaches.executors.kokoro.utils import model_registry as kokoro_model_registry
 from speaches.executors.piper.utils import PiperModel
 from speaches.executors.piper.utils import model_registry as piper_model_registry
+from speaches.executors.turkish import catalog
 from speaches.executors.whisper.utils import model_registry as whisper_model_registry
 from speaches.hf_utils import delete_local_model_repo
 from speaches.model_aliases import ModelId
@@ -27,7 +28,7 @@ router = APIRouter(tags=["models"])
 # HACK: returning ListModelsResponse directly causes extra `Model` fields to be omitted
 @router.get("/v1/models", response_model=ListModelsResponse)
 def list_local_models(task: ModelTask | None = None) -> JSONResponse:
-    models: list[Model] = []
+    models: list[Model] = catalog.models(task)
     if task is None or task == "text-to-speech":
         models.extend(list(kokoro_model_registry.list_local_models()))
         models.extend(list(piper_model_registry.list_local_models()))
@@ -44,7 +45,7 @@ class ListAudioModelsResponse(BaseModel):
 # HACK: returning ListModelsResponse directly causes extra `Model` fields to be omitted
 @router.get("/v1/audio/models", response_model=ListAudioModelsResponse)
 def list_local_audio_models() -> JSONResponse:
-    models: list[Model] = []
+    models: list[Model] = catalog.models("text-to-speech")
     models.extend(list(kokoro_model_registry.list_local_models()))
     models.extend(list(piper_model_registry.list_local_models()))
     return JSONResponse(content={"models": [model.model_dump() for model in models], "object": "list"})
@@ -61,14 +62,17 @@ def list_local_audio_voices() -> JSONResponse:
     models.extend(list(kokoro_model_registry.list_local_models()))
     models.extend(list(piper_model_registry.list_local_models()))
     voices = [voice for model in models for voice in model.voices]
-    return JSONResponse(content={"voices": [voice.model_dump() for voice in voices], "object": "list"})
+    voice_data = [voice.model_dump() for voice in voices]
+    for model in catalog.models("text-to-speech"):
+        voice_data.extend(model.voices)
+    return JSONResponse(content={"voices": voice_data, "object": "list"})
 
 
 # TODO: this is very naive implementation. It should be improved
 # NOTE: without `response_model` and `JSONResponse` extra fields aren't included in the response
 @router.get("/v1/models/{model_id:path}", response_model=Model)
 def get_local_model(model_id: ModelId) -> JSONResponse:
-    models: list[Model] = []
+    models: list[Model] = catalog.models()
     models.extend(list(kokoro_model_registry.list_local_models()))
     models.extend(list(piper_model_registry.list_local_models()))
     models.extend(list(whisper_model_registry.list_local_models()))
@@ -81,6 +85,8 @@ def get_local_model(model_id: ModelId) -> JSONResponse:
 # NOTE: without `response_model` and `JSONResponse` extra fields aren't included in the response
 @router.post("/v1/models/{model_id:path}")
 def download_remote_model(model_id: ModelId) -> Response:
+    if model_id in {model.id for model in catalog.models()}:
+        return Response(status_code=201, content=f"Model '{model_id}' already exists")
     if model_id in [model.id for model in kokoro_model_registry.list_remote_models()]:
         was_downloaded = kokoro_model_registry.download_model_files_if_not_exist(model_id)
     elif model_id in [model.id for model in piper_model_registry.list_remote_models()]:
@@ -99,6 +105,8 @@ def download_remote_model(model_id: ModelId) -> Response:
 # TODO: document that any model will be deleted regardless if it's supported speaches or not
 @router.delete("/v1/models/{model_id:path}")
 def delete_model(model_id: ModelId) -> Response:
+    if model_id in {model.id for model in catalog.models()}:
+        raise HTTPException(409, "Disable Turkish models before deleting their active weights")
     try:
         delete_local_model_repo(model_id)
     except FileNotFoundError as e:
@@ -109,7 +117,7 @@ def delete_model(model_id: ModelId) -> Response:
 # HACK: returning ListModelsResponse directly causes extra `Model` fields to be omitted
 @router.get("/v1/registry", response_model=ListModelsResponse)
 def get_remote_models(task: ModelTask | None = None) -> JSONResponse:
-    models: list[Model] = []
+    models: list[Model] = catalog.models(task)
     if task is None or task == "text-to-speech":
         models.extend(list(kokoro_model_registry.list_remote_models()))
         models.extend(list(piper_model_registry.list_remote_models()))

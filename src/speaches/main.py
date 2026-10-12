@@ -1,7 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+from contextlib import asynccontextmanager
 import logging
+from typing import TYPE_CHECKING
 import uuid
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 from fastapi import (
     FastAPI,
@@ -54,6 +60,20 @@ TAGS_METADATA = [
 ]
 
 
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from speaches.executors.turkish.runtime import TurkishRuntime
+
+    app.state.turkish = None
+    if get_config().enable_turkish_models:
+        app.state.turkish = await asyncio.to_thread(TurkishRuntime.load)
+    try:
+        yield
+    finally:
+        if app.state.turkish is not None:
+            await app.state.turkish.close()
+
+
 def create_app() -> FastAPI:
     config = get_config()  # HACK
     setup_logger(config.log_level)
@@ -66,6 +86,7 @@ def create_app() -> FastAPI:
         dependencies.append(ApiKeyDependency)
 
     app = FastAPI(
+        lifespan=lifespan,
         dependencies=dependencies,
         title="Speaches",
         version="v0.8.2",  # TODO: update this on release

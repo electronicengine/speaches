@@ -1,7 +1,7 @@
 import logging
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 from huggingface_hub.utils._cache_manager import _scan_cached_repo
 from pydantic import BaseModel, Field
@@ -42,6 +42,7 @@ router = APIRouter(tags=["speech-to-text"])
 
 class CreateSpeechRequestBody(BaseModel):
     model: ModelId
+    seed: int | None = None
     input: str
     """The text to generate audio for."""
     voice: str
@@ -60,7 +61,22 @@ async def synthesize(  # noqa: C901, PLR0912
     piper_model_manager: PiperModelManagerDependency,
     kokoro_model_manager: KokoroModelManagerDependency,
     body: CreateSpeechRequestBody,
+    request: Request,
 ) -> Response | StreamingResponse:
+    if body.model == "canberkkkkkk/ema-lightning":
+        from pydantic import ValidationError
+
+        from speaches.executors.turkish.runtime import SpeechRequest
+
+        runtime = request.app.state.turkish
+        if runtime is None:
+            raise HTTPException(503, "Turkish models are disabled")
+        try:
+            speech = SpeechRequest.model_validate({**body.model_dump(), "sample_rate": body.sample_rate or 24000})
+        except ValidationError as exc:
+            raise HTTPException(422, "Invalid EMA speech parameters") from exc
+        return await runtime.speech(speech, request)
+
     model_repo_path = get_model_repo_path(body.model)
     if model_repo_path is None:
         raise HTTPException(
