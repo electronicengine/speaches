@@ -49,6 +49,17 @@ class WhisperModelManager:
             # WARN: ~300 MB of memory will still be held by the model. See https://github.com/SYSTRAN/faster-whisper/issues/992
             self.loaded_models[model_id].unload()
 
+    def unload_idle_models(self) -> None:
+        # Unload outside the manager lock: callbacks acquire that lock.
+        with self._lock:
+            models = list(self.loaded_models.values())
+        for model in models:
+            try:
+                model.unload()
+            except ValueError:
+                # A model currently serving another request must stay loaded.
+                continue
+
     def load_model(self, model_id: str) -> SelfDisposingModel[WhisperModel]:
         logger.debug(f"Loading model {model_id}")
         with self._lock:

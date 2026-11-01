@@ -17,6 +17,11 @@ REVISION = "4f868b7a4a7cfaccb97fdaf12cdc8fdfabc8caad"
 
 DUXX_MODEL = "duxx/turkish-stt-zipformer"
 DUXX_REVISION = "cebec199e0a9a1bdcd195b9124922b4a33e98bc8"
+AYAZ_MODEL = "VeliAyaz/ayaz-asr-tr-streaming-0.6b"
+AYAZ_REVISION = "a6dbed373347312475dfc3888a163dae9ac67ffb"
+AYAZ_LANGUAGES = (
+    "tr de en fr es it pt nl ru uk pl cs sk sl hr bg ro hu fi et lv lt sv da no el ar he hi ja ko vi zh".split()
+)
 
 
 def load_recognizer(model: str = MODEL) -> OnlineRecognizer:
@@ -24,6 +29,27 @@ def load_recognizer(model: str = MODEL) -> OnlineRecognizer:
 
     from huggingface_hub import snapshot_download
     import sherpa_onnx
+
+    if model == AYAZ_MODEL:
+        root = Path(
+            snapshot_download(
+                model,
+                revision=AYAZ_REVISION,
+                allow_patterns=["sherpa-onnx-int8-560ms/*", "README.md", "LICENSE", "NOTICE", "SHA256SUMS"],
+            )
+        )
+        root = root / "sherpa-onnx-int8-560ms"
+        return sherpa_onnx.OnlineRecognizer.from_transducer(
+            tokens=str(root / "tokens.txt"),
+            encoder=str(root / "encoder.int8.onnx"),
+            decoder=str(root / "decoder.int8.onnx"),
+            joiner=str(root / "joiner.int8.onnx"),
+            feature_dim=128,
+            num_threads=2,
+            decoding_method="greedy_search",
+            provider="cpu",
+            enable_endpoint_detection=False,
+        )
 
     if model == DUXX_MODEL:
         names = {part: f"{part}-epoch-1-avg-1-chunk-32-left-128.int8.onnx" for part in ("encoder", "decoder", "joiner")}
@@ -49,7 +75,9 @@ def load_recognizer(model: str = MODEL) -> OnlineRecognizer:
     )
 
 
-def transcribe(recognizer: OnlineRecognizer, audio: bytes, stopped: threading.Event) -> tuple[str, float]:
+def transcribe(
+    recognizer: OnlineRecognizer, audio: bytes, stopped: threading.Event, *, language: str | None = None
+) -> tuple[str, float]:
     import soundfile as sf
     import soxr
 
@@ -71,6 +99,8 @@ def transcribe(recognizer: OnlineRecognizer, audio: bytes, stopped: threading.Ev
     if rate != 16000:
         samples = soxr.resample(samples, rate, 16000)
     stream = recognizer.create_stream()
+    if language is not None:
+        stream.set_option("language", language)
     stream.accept_waveform(16000, samples)
     stream.accept_waveform(16000, np.zeros(8000, dtype=np.float32))
     stream.input_finished()

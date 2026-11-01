@@ -1,5 +1,7 @@
 from speaches.api_types import Model, ModelTask
 from speaches.dependencies import get_config
+from speaches.executors import pocket, trendyol
+from speaches.executors.turkish.stt import AYAZ_LANGUAGES, AYAZ_MODEL
 
 EMA_ID = "canberkkkkkk/ema-lightning"
 MIHU_ID = "mihuai/turkish-stt"
@@ -7,7 +9,7 @@ MIHU_ID = "mihuai/turkish-stt"
 
 def models(task: ModelTask | None = None) -> list[Model]:
     if not get_config().enable_turkish_models:
-        return []
+        return pocket.models(get_config(), task) + trendyol.models(get_config(), task)
     items = [
         Model(
             id="duxx/turkish-stt-zipformer",
@@ -34,4 +36,19 @@ def models(task: ModelTask | None = None) -> list[Model]:
             license_url="https://huggingface.co/mihuai/turkish-stt/blob/main/LICENSE",
         ),
     ]
-    return [item for item in items if task is None or item.task == task]
+    if get_config().enable_ayaz_stt:
+        items.append(
+            Model(
+                id=AYAZ_MODEL,
+                owned_by="VeliAyaz",
+                task="automatic-speech-recognition",
+                language=AYAZ_LANGUAGES,
+                attribution="Ayaz ASR by Veli Ayaz; NVIDIA Nemotron base model",
+                license_url=f"https://huggingface.co/{AYAZ_MODEL}/blob/main/LICENSE",
+            )
+        )
+    return (
+        [item for item in items if task is None or item.task == task]
+        + pocket.models(get_config(), task)
+        + trendyol.models(get_config(), task)
+    )

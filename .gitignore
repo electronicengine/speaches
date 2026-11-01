@@ -171,6 +171,9 @@ tests/data
 .ruff_cache
 .aider*
 speaches_debug
+.pocket-venv/
+.pocket-runtime/
+.trendyol-runtime/
 
 # OS-specific
 Thumbs.db

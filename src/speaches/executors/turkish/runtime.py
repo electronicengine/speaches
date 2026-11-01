@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+from functools import partial
 import logging
 import threading
+import time
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -71,11 +73,13 @@ class TurkishRuntime:
         model: EMA,
         recognizer: OnlineRecognizer,
         duxx_recognizer: OnlineRecognizer | None = None,
+        ayaz_recognizer: OnlineRecognizer | None = None,
     ) -> None:
         self.settings = settings
         self.model = model
         self.recognizer = recognizer
         self.duxx_recognizer = duxx_recognizer
+        self.ayaz_recognizer = ayaz_recognizer
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=settings.max_streams)
         self.stt_executor = concurrent.futures.ThreadPoolExecutor(max_workers=settings.stt_max_streams)
         self.active = 0
@@ -87,7 +91,18 @@ class TurkishRuntime:
         from ema_lightning import EMA
 
         settings = Settings()
-        return cls(settings, EMA(device=settings.device), stt.load_recognizer(), stt.load_recognizer(stt.DUXX_MODEL))
+        model = EMA(device=settings.device)
+        logger.info("Warming up EMA before accepting requests")
+        started = time.monotonic()
+        # The first stream benchmarks batch sizes. Complete it before readiness
+        # so the first caller does not pay for calibration and lazy setup.
+        for _ in model.stream("Merhaba.", seed=0, sample_rate=24000):
+            pass
+        logger.info("EMA warm-up completed in %.2f seconds", time.monotonic() - started)
+        from speaches.dependencies import get_config
+
+        ayaz = stt.load_recognizer(stt.AYAZ_MODEL) if get_config().enable_ayaz_stt else None
+        return cls(settings, model, stt.load_recognizer(), stt.load_recognizer(stt.DUXX_MODEL), ayaz)
 
     async def close(self) -> None:
         for stop in self.stops:
@@ -104,8 +119,19 @@ class TurkishRuntime:
         stream: bool = False,
         model: str = stt.MODEL,
     ) -> Response:
-        if language not in (None, "tr") or response_format not in {"json", "verbose_json", "text"} or stream:
-            raise HTTPException(422, "Turkish STT supports tr and non-streaming json, verbose_json or text")
+        allowed_languages = (None, *stt.AYAZ_LANGUAGES) if model == stt.AYAZ_MODEL else (None, "tr")
+        if language not in allowed_languages or response_format not in {"json", "verbose_json", "text"} or stream:
+            raise HTTPException(422, "Unsupported STT language or format; use non-streaming json, verbose_json or text")
+        recognizer = self.recognizer
+        attribution = "Powered by mihu"
+        transcribe = stt.transcribe
+        if model == stt.DUXX_MODEL:
+            recognizer, attribution = self.duxx_recognizer, "duxx"
+        elif model == stt.AYAZ_MODEL:
+            recognizer, attribution = self.ayaz_recognizer, "Ayaz ASR by Veli Ayaz"
+            transcribe = partial(stt.transcribe, language=language)
+            if recognizer is None:
+                raise HTTPException(503, "Ayaz STT is disabled")
         if file.size is not None and file.size > 16 * 1024 * 1024:
             raise HTTPException(413, "Audio upload exceeds 16 MiB")
         if self.stt_active >= self.settings.stt_max_streams:
@@ -128,8 +154,8 @@ class TurkishRuntime:
                     raise HTTPException(413, "Audio upload exceeds 16 MiB")
                 future = asyncio.get_running_loop().run_in_executor(
                     self.stt_executor,
-                    stt.transcribe,
-                    self.duxx_recognizer if model == stt.DUXX_MODEL else self.recognizer,
+                    transcribe,
+                    recognizer,
                     data,
                     stopped,
                 )
@@ -141,13 +167,18 @@ class TurkishRuntime:
                 text, duration = future.result()
                 headers = {
                     "Cache-Control": "no-store",
-                    "X-Attribution": "duxx" if model == stt.DUXX_MODEL else "Powered by mihu",
+                    "X-Attribution": attribution,
                 }
                 if response_format == "text":
                     return PlainTextResponse(text, headers=headers)
                 result = {"text": text}
                 if response_format == "verbose_json":
-                    result.update(language="tr", duration=duration, task="transcribe", segments=[])
+                    result.update(
+                        language=language or ("unknown" if model == stt.AYAZ_MODEL else "tr"),
+                        duration=duration,
+                        task="transcribe",
+                        segments=[],
+                    )
                 return JSONResponse(result, headers=headers)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc

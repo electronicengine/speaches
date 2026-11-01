@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from typing import Literal
 
@@ -7,7 +8,12 @@ from huggingface_hub.utils._cache_manager import _scan_cached_repo
 from pydantic import BaseModel, Field
 
 from speaches.audio import convert_audio_format
-from speaches.dependencies import KokoroModelManagerDependency, PiperModelManagerDependency
+from speaches.dependencies import (
+    ConfigDependency,
+    KokoroModelManagerDependency,
+    PiperModelManagerDependency,
+    WhisperModelManagerDependency,
+)
 from speaches.executors.kokoro import utils as kokoro_utils
 from speaches.executors.piper import utils as piper_utils
 from speaches.hf_utils import (
@@ -58,11 +64,24 @@ class CreateSpeechRequestBody(BaseModel):
 # NOTE: `response_model=None` because `Response | StreamingResponse` are not serializable by Pydantic.
 @router.post("/v1/audio/speech", response_model=None)
 async def synthesize(  # noqa: C901, PLR0912
+    config: ConfigDependency,
+    whisper_model_manager: WhisperModelManagerDependency,
     piper_model_manager: PiperModelManagerDependency,
     kokoro_model_manager: KokoroModelManagerDependency,
     body: CreateSpeechRequestBody,
     request: Request,
 ) -> Response | StreamingResponse:
+    if body.model == "Trendyol/Trendyol-TTS":
+        from speaches.executors.pocket import worker_speech
+
+        await asyncio.to_thread(whisper_model_manager.unload_idle_models)
+        return await worker_speech(
+            config, body.model_dump(), worker_url=config.trendyol_tts_url, voices=["default"], model_name="Trendyol TTS"
+        )
+    if body.model == "wite-tech/pocket-tts-turkish":
+        from speaches.executors import pocket
+
+        return await pocket.speech(config, body.model_dump())
     if body.model == "canberkkkkkk/ema-lightning":
         from pydantic import ValidationError
 

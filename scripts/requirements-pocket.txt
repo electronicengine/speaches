@@ -1,0 +1,4 @@
+pocket-tts==3.3.0
+pocket-tts-turkish==0.1.0
+sentencepiece==0.2.2
+voxcpm==2.0.3

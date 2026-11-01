@@ -84,6 +84,9 @@ class Config(BaseSettings):
     """
 
     enable_turkish_models: bool = False
+    enable_ayaz_stt: bool = False
+    pocket_tts_url: str | None = None
+    trendyol_tts_url: str | None = None
     enable_ui: bool = True
     """
     Whether to enable the Gradio UI. You may want to disable this if you want to minimize the dependencies and slightly improve the startup time.

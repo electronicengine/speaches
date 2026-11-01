@@ -30,6 +30,7 @@ from speaches.dependencies import (
     WhisperModelManagerDependency,
     audio_file_dependency,
 )
+from speaches.executors.turkish.stt import AYAZ_MODEL
 from speaches.executors.whisper import utils as whisper_utils
 from speaches.hf_utils import (
     MODEL_CARD_DOESNT_EXISTS_ERROR_MESSAGE,
@@ -178,7 +179,7 @@ async def transcribe_file(
     hotwords: Annotated[str | None, Form()] = None,
     vad_filter: Annotated[bool | None, Form()] = None,
 ) -> Response | StreamingResponse:
-    if model in ("mihuai/turkish-stt", "duxx/turkish-stt-zipformer"):
+    if model in ("mihuai/turkish-stt", "duxx/turkish-stt-zipformer", AYAZ_MODEL):
         runtime = request.app.state.turkish
         if runtime is None:
             raise HTTPException(503, "Turkish models are disabled")

@@ -1,0 +1,20 @@
+services:
+  speaches:
+    image: speaches-local:cuda
+    build:
+      platforms: !override
+        - linux/amd64
+      args:
+        BASE_IMAGE: nvidia/cuda:12.6.3-cudnn-runtime-ubuntu24.04
+    healthcheck:
+      test: ["CMD-SHELL", 'curl --fail --silent -H "Authorization: Bearer $$API_KEY" http://127.0.0.1:8000/health >/dev/null']
+      start_period: 20m
+    ports: !override
+      - "127.0.0.1:8000:8000"
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate --url http://speaches:8000
+    restart: unless-stopped
+    depends_on:
+      speaches:
+        condition: service_healthy
